@@ -1,0 +1,14 @@
+services:
+
+  ui:
+    build: .
+    ports:
+      - "${APP_PORT:-8080}:80"
+    networks:
+      - kbb-net
+    restart: unless-stopped
+
+networks:
+  kbb-net:
+    external: true
+    name: kbb-net
