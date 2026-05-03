@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { BookOpen, Database } from 'lucide-react'
+import { BookOpen, Database, ScrollText } from 'lucide-react'
 
 export default function Sidebar() {
   return (
@@ -20,18 +20,31 @@ export default function Sidebar() {
       {/* Nav */}
       <nav className="flex-1 px-3 py-4 space-y-0.5" aria-label="Main navigation">
         <NavLink
-          to="/"
-          end
+          to="/editais"
           className={({ isActive }) =>
-            `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+            `flex items-center gap-3 pr-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
               isActive
-                ? 'bg-blue-50 text-blue-700'
-                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                ? 'bg-blue-50 text-blue-700 border-l-2 border-blue-600 pl-[10px]'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 border-l-2 border-transparent pl-[10px]'
+            }`
+          }
+        >
+          <ScrollText className="w-4 h-4 shrink-0" />
+          Editais
+        </NavLink>
+
+        <NavLink
+          to="/exams"
+          className={({ isActive }) =>
+            `flex items-center gap-3 pr-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+              isActive
+                ? 'bg-blue-50 text-blue-700 border-l-2 border-blue-600 pl-[10px]'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 border-l-2 border-transparent pl-[10px]'
             }`
           }
         >
           <BookOpen className="w-4 h-4 shrink-0" />
-          Exams
+          Provas
         </NavLink>
       </nav>
 

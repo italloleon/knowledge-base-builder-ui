@@ -1,6 +1,7 @@
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export type JobStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'partial'
+export type DocumentCategory = 'prova' | 'edital'
 
 export type QuestionSection =
   | 'conhecimentos_gerais'
@@ -17,11 +18,14 @@ export type QuestionType =
 export interface IngestResponse {
   job_id: string
   exam_id: string | null
+  edital_id: string | null
 }
 
 export interface Job {
   id: string
   exam_id: string | null
+  edital_id: string | null
+  category: DocumentCategory
   status: JobStatus
   total_found: number | null
   parsed_ok: number | null
@@ -31,10 +35,72 @@ export interface Job {
   updated_at: string
 }
 
+export interface Edital {
+  id: string
+  filename: string
+  file_hash: string
+  numero_edital: string | null
+  ano: number | null
+  edition_name: string | null
+  organizadora: string | null
+  instituicao_gestora: string | null
+  modalidade: string | null
+  total_questoes_gerais: number | null
+  total_questoes_especificas: number | null
+  percentual_minimo_aprovacao: number | null
+  bolsa_mensal: number | null
+  data_inicio_programas: string | null
+  contato_email: string | null
+  contato_telefone: string | null
+  url_enare: string | null
+  /** Etapas do processo seletivo — evento, data_inicio, data_fim (YYYY-MM-DD) */
+  cronograma: CronogramaEvento[] | null
+  vagas: VagaEntry[] | null
+  instituicoes: InstituicaoEntry[] | null
+  knowledge_areas: KnowledgeAreaProfession[] | null
+  created_at: string
+}
+
+export interface CronogramaEvento {
+  evento: string
+  data_inicio: string
+  data_fim: string | null
+}
+
+export interface KnowledgeAreaEntry {
+  area: string
+  topicos: string[]
+}
+
+export interface KnowledgeAreaProfession {
+  profissao: string
+  gerais: KnowledgeAreaEntry[]
+  especificos: KnowledgeAreaEntry[]
+}
+
+export interface VagaEntry {
+  profissao: string
+  instituicao: string
+  cidade: string
+  estado: string
+  programa: string
+  vagas_ampla: number
+  vagas_reservadas: Record<string, number>
+}
+
+export interface InstituicaoEntry {
+  nome: string
+  sigla: string
+  cidade: string
+  estado: string
+  programas: string[]
+}
+
 export interface Exam {
   id: string
   filename: string
   file_hash: string
+  edital_id: string | null
   question_count: number
   enriched_count: number
   created_at: string
@@ -53,12 +119,37 @@ export interface Alternatives {
   E: string
 }
 
+export interface TaxonomyMatchDetail {
+  area_match: string
+  topic_match: string
+}
+
+export interface QuestionExplanation {
+  correta: string
+  justificativa_correta: string
+  justificativas_erradas: Record<string, string>
+  conceito_central: string
+  confidence: number
+  flagged: boolean
+}
+
 export interface QuestionEnrichment {
-  area: string
-  topic: string
+  area?: string | null
+  topic?: string | null
+  competencia_geral_area?: string | null
+  competencia_geral_topico?: string | null
+  competencia_especifica_area?: string | null
+  competencia_especifica_topico?: string | null
   keywords: string[]
   difficulty: 'facil' | 'medio' | 'dificil'
   bloom_level: string
+  taxonomy_grounded?: boolean
+  taxonomy_needs_review?: boolean
+  taxonomy_match?: {
+    question: TaxonomyMatchDetail
+    competencia_geral: TaxonomyMatchDetail
+    competencia_especifica: TaxonomyMatchDetail
+  }
 }
 
 export interface Question {
@@ -74,6 +165,8 @@ export interface Question {
   gabarito: string | null
   confidence: number
   enrichment: QuestionEnrichment | null
+  explanation: QuestionExplanation | null
+  explanation_flagged: boolean
   raw_block?: string
   created_at: string
 }
@@ -109,8 +202,14 @@ export interface HealthStatus {
 
 // ─── Base fetch helper ───────────────────────────────────────────────────────
 
+const API_PREFIX = '/api'
+
+function apiPath(path: string): string {
+  return `${API_PREFIX}${path}`
+}
+
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
+  const res = await fetch(apiPath(path), {
     headers: {
       'Accept': 'application/json',
       ...(init?.headers ?? {}),
@@ -134,8 +233,6 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 
 // ─── Ingest endpoints ────────────────────────────────────────────────────────
 
-export type DocumentCategory = 'prova' | 'edital'
-
 export async function uploadFile(file: File, category: DocumentCategory): Promise<IngestResponse> {
   const form = new FormData()
   form.append('file', file)
@@ -158,6 +255,63 @@ export async function ingestUrl(url: string, category: DocumentCategory): Promis
 
 export async function getJob(id: string): Promise<Job> {
   return apiFetch<Job>(`/jobs/${id}`)
+}
+
+// ─── Editais ─────────────────────────────────────────────────────────────────
+
+export async function listEditais(): Promise<Edital[]> {
+  return apiFetch<Edital[]>('/editais')
+}
+
+export async function getEdital(id: string): Promise<Edital> {
+  return apiFetch<Edital>(`/editais/${id}`)
+}
+
+export interface EditalEnrichResponse {
+  message: string
+  job_id: string
+}
+
+export async function enrichEdital(editalId: string): Promise<EditalEnrichResponse> {
+  return apiFetch<EditalEnrichResponse>(`/editais/${editalId}/enrich`, {
+    method: 'POST',
+  })
+}
+
+export async function enrichEditalFromUpload(
+  editalId: string,
+  file: File,
+): Promise<EditalEnrichResponse> {
+  const form = new FormData()
+  form.append('file', file)
+  return apiFetch<EditalEnrichResponse>(`/editais/${editalId}/enrich-upload`, {
+    method: 'POST',
+    body: form,
+  })
+}
+
+export async function deleteEdital(id: string): Promise<void> {
+  const res = await fetch(apiPath(`/editais/${id}`), { method: 'DELETE' })
+  if (!res.ok) {
+    let message = `HTTP ${res.status}`
+    try {
+      const body = await res.json() as { detail?: string }
+      message = body.detail ?? message
+    } catch { /* ignore */ }
+    throw new Error(message)
+  }
+}
+
+export async function listEditalExams(editalId: string): Promise<Exam[]> {
+  return apiFetch<Exam[]>(`/editais/${editalId}/exams`)
+}
+
+export async function linkExamToEdital(examId: string, editalId: string): Promise<Exam> {
+  return apiFetch<Exam>(`/exams/${examId}/edital`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ edital_id: editalId }),
+  })
 }
 
 // ─── Exams ───────────────────────────────────────────────────────────────────
@@ -209,7 +363,29 @@ export async function enrichExam(
   })
 }
 
+export async function explainExam(
+  examId: string,
+  mode: 'missing' | 'all',
+  provider?: EnrichProvider,
+): Promise<{ message: string; queued: number }> {
+  return apiFetch(`/exams/${examId}/explain`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode, provider: provider ?? null }),
+  })
+}
+
 export interface ImportResult {
+  exams_created: number
+  exams_existing: number
+  questions_created: number
+  questions_skipped: number
+  questions_enrichment_updated: number
+}
+
+export interface FullImportResult {
+  editais_created: number
+  editais_existing: number
   exams_created: number
   exams_existing: number
   questions_created: number
@@ -227,7 +403,7 @@ export async function importExams(file: File): Promise<ImportResult> {
 }
 
 export async function exportExams(format: 'json' | 'csv'): Promise<void> {
-  const res = await fetch(`/exams/export?format=${format}`)
+  const res = await fetch(apiPath(`/exams/export?format=${format}`))
   if (!res.ok) {
     throw new Error(`Export failed: HTTP ${res.status}`)
   }
@@ -242,8 +418,33 @@ export async function exportExams(format: 'json' | 'csv'): Promise<void> {
   URL.revokeObjectURL(url)
 }
 
+export async function importFullDataset(file: File): Promise<FullImportResult> {
+  const form = new FormData()
+  form.append('file', file)
+  return apiFetch<FullImportResult>('/import/full', {
+    method: 'POST',
+    body: form,
+  })
+}
+
+export async function exportFullDataset(): Promise<void> {
+  const res = await fetch(apiPath('/import/export/full'))
+  if (!res.ok) {
+    throw new Error(`Export failed: HTTP ${res.status}`)
+  }
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'knowledge_base_full_export.json'
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
 export async function deleteExam(examId: string): Promise<void> {
-  const res = await fetch(`/exams/${examId}`, { method: 'DELETE' })
+  const res = await fetch(apiPath(`/exams/${examId}`), { method: 'DELETE' })
   if (!res.ok) {
     let message = `HTTP ${res.status}`
     try {
@@ -252,6 +453,44 @@ export async function deleteExam(examId: string): Promise<void> {
     } catch { /* ignore */ }
     throw new Error(message)
   }
+}
+
+// ─── Gabarito ────────────────────────────────────────────────────────────────
+
+export interface GabaritoCaderno {
+  name: string
+  answers: Record<string, string | null>
+  answer_count: number
+  annulled: number[]
+}
+
+export interface GabaritoParseResponse {
+  cadernos: GabaritoCaderno[]
+}
+
+export interface ApplyGabaritoResponse {
+  updated: number
+  annulled: number
+}
+
+export async function parseGabaritoFile(file: File): Promise<GabaritoParseResponse> {
+  const form = new FormData()
+  form.append('file', file)
+  return apiFetch<GabaritoParseResponse>('/gabarito/parse', {
+    method: 'POST',
+    body: form,
+  })
+}
+
+export async function applyGabarito(
+  examId: string,
+  answers: Record<string, string | null>,
+): Promise<ApplyGabaritoResponse> {
+  return apiFetch<ApplyGabaritoResponse>(`/exams/${examId}/gabarito`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ answers }),
+  })
 }
 
 // ─── Health ──────────────────────────────────────────────────────────────────

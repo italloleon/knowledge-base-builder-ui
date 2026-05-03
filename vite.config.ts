@@ -6,27 +6,7 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
-      '/ingest': {
-        target: 'http://localhost:8000',
-        changeOrigin: true,
-      },
-      '/jobs': {
-        target: 'http://localhost:8000',
-        changeOrigin: true,
-      },
-      '/exams': {
-        target: 'http://localhost:8000',
-        changeOrigin: true,
-      },
-      '/questions': {
-        target: 'http://localhost:8000',
-        changeOrigin: true,
-      },
-      '/import': {
-        target: 'http://localhost:8000',
-        changeOrigin: true,
-      },
-      '/health': {
+      '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,
       },

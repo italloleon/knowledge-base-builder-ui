@@ -10,10 +10,13 @@ import {
   ChevronRight as ChevronRightIcon,
   SlidersHorizontal,
   Sparkles,
+  ClipboardCheck,
+  BookOpen,
 } from 'lucide-react'
-import { listExams, getExamQuestions, getExamErrors, enrichExam } from '../api/client'
+import { listExams, getExamQuestions, getExamErrors, enrichExam, explainExam } from '../api/client'
 import type { QuestionSection, QuestionType, QuestionsFilters, EnrichProvider } from '../api/client'
 import QuestionCard from '../components/QuestionCard'
+import GabaritoModal from '../components/GabaritoModal'
 
 const PAGE_SIZE = 20
 
@@ -72,6 +75,7 @@ export default function ExamDetailPage() {
   const [page, setPage] = useState(1)
   const [enrichMsg, setEnrichMsg] = useState<string | null>(null)
   const [enrichProvider, setEnrichProvider] = useState<EnrichProvider>('ollama')
+  const [showGabaritoModal, setShowGabaritoModal] = useState(false)
 
   const enrichMutation = useMutation({
     mutationFn: ({ mode }: { mode: 'missing' | 'all' }) =>
@@ -83,6 +87,20 @@ export default function ExamDetailPage() {
           : `Queued ${data.queued} question${data.queued !== 1 ? 's' : ''} for enrichment. This runs in the background.`,
       )
       void queryClient.invalidateQueries({ queryKey: ['exams'] })
+    },
+    onError: (err) => {
+      setEnrichMsg(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`)
+    },
+  })
+
+  const explainMutation = useMutation({
+    mutationFn: () => explainExam(examId, 'missing', enrichProvider),
+    onSuccess: (data) => {
+      setEnrichMsg(
+        data.queued === 0
+          ? 'All questions already have explanations.'
+          : `Queued ${data.queued} question${data.queued !== 1 ? 's' : ''} for explanation.`,
+      )
     },
     onError: (err) => {
       setEnrichMsg(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`)
@@ -135,7 +153,7 @@ export default function ExamDetailPage() {
     <div className="max-w-5xl mx-auto px-6 py-8">
       {/* Breadcrumb */}
       <nav className="flex items-center gap-2 text-sm text-slate-500 mb-6" aria-label="Breadcrumb">
-        <Link to="/" className="hover:text-blue-600 transition-colors">
+        <Link to="/exams" className="hover:text-blue-600 transition-colors">
           Exams
         </Link>
         <ChevronRight className="w-4 h-4 text-slate-300" />
@@ -217,6 +235,8 @@ export default function ExamDetailPage() {
               </button>
             </div>
 
+            <div className="w-px h-6 bg-slate-200 self-center" />
+
             {/* Enrich missing */}
             <button
               onClick={() => {
@@ -246,6 +266,31 @@ export default function ExamDetailPage() {
             >
               <RefreshCw className={`w-4 h-4 text-slate-400 ${enrichMutation.isPending ? 'animate-spin' : ''}`} />
               Re-enrich All
+            </button>
+
+            <div className="w-px h-6 bg-slate-200 self-center" />
+
+            {/* Gabarito */}
+            <button
+              onClick={() => setShowGabaritoModal(true)}
+              disabled={exam.question_count === 0}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-green-50 border border-green-200 text-green-800 text-sm font-medium rounded-lg hover:bg-green-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <ClipboardCheck className="w-4 h-4 text-green-600" />
+              Gabarito
+            </button>
+
+            {/* Explain */}
+            <button
+              onClick={() => {
+                setEnrichMsg(null)
+                explainMutation.mutate()
+              }}
+              disabled={exam.question_count === 0 || enrichMutation.isPending || explainMutation.isPending}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-50 border border-indigo-200 text-indigo-800 text-sm font-medium rounded-lg hover:bg-indigo-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <BookOpen className="w-4 h-4 text-indigo-500" />
+              Explain
             </button>
 
             {enrichMsg && (
@@ -401,6 +446,11 @@ export default function ExamDetailPage() {
             Retry
           </button>
         </div>
+      )}
+
+      {/* Gabarito modal */}
+      {showGabaritoModal && (
+        <GabaritoModal examId={examId} onClose={() => setShowGabaritoModal(false)} />
       )}
 
       {/* Questions list */}

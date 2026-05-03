@@ -1,9 +1,9 @@
 import { useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { Upload, BookOpen, FileText, HelpCircle, RefreshCw, AlertCircle, Trash2, Download, FolderUp, CheckCircle2 } from 'lucide-react'
-import { listExams, deleteExam, exportExams, importExams } from '../api/client'
-import type { Exam, ImportResult } from '../api/client'
+import { Upload, BookOpen, FileText, HelpCircle, RefreshCw, AlertCircle, Trash2, Download, FolderUp, CheckCircle2, ScrollText } from 'lucide-react'
+import { listExams, deleteExam, exportExams, importExams, exportFullDataset, importFullDataset } from '../api/client'
+import type { Exam, FullImportResult, ImportResult } from '../api/client'
 import UploadModal from '../components/UploadModal'
 
 function formatDate(iso: string): string {
@@ -56,9 +56,6 @@ function ExamCard({ exam }: { exam: Exam }) {
             <p className="text-sm font-semibold text-slate-900 truncate group-hover:text-blue-700 transition-colors">
               {exam.filename}
             </p>
-            <p className="text-xs text-slate-400 mt-0.5 font-mono">
-              {exam.file_hash.slice(0, 12)}...
-            </p>
           </div>
         </Link>
 
@@ -94,7 +91,25 @@ function ExamCard({ exam }: { exam: Exam }) {
           <HelpCircle className="w-3.5 h-3.5" />
           {exam.question_count} questions
         </span>
-        <span>{formatDate(exam.created_at)}</span>
+        {exam.enriched_count > 0 && (
+          <span className="text-violet-600 font-medium">
+            · {exam.enriched_count}/{exam.question_count} enriched
+          </span>
+        )}
+        {exam.edital_id && (
+          <Link
+            to={`/editais/${exam.edital_id}`}
+            onClick={(e) => e.stopPropagation()}
+            className="flex items-center gap-1 text-emerald-600 hover:text-emerald-700 font-medium"
+          >
+            <ScrollText className="w-3.5 h-3.5" />
+            Edital
+          </Link>
+        )}
+        <span className="ml-auto flex items-center gap-3">
+          <span className="text-[10px] text-slate-300 font-mono">{exam.file_hash.slice(0, 12)}</span>
+          {formatDate(exam.created_at)}
+        </span>
       </div>
     </div>
   )
@@ -127,8 +142,10 @@ export default function ExamsPage() {
   const [exportError, setExportError] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState<ImportResult | null>(null)
+  const [fullImportResult, setFullImportResult] = useState<FullImportResult | null>(null)
   const [importError, setImportError] = useState<string | null>(null)
   const importInputRef = useRef<HTMLInputElement>(null)
+  const importFullInputRef = useRef<HTMLInputElement>(null)
   const queryClient = useQueryClient()
 
   const { data: exams, isLoading, isError, error, refetch } = useQuery({
@@ -153,6 +170,7 @@ export default function ExamsPage() {
   async function handleImportFile(file: File) {
     setImporting(true)
     setImportResult(null)
+    setFullImportResult(null)
     setImportError(null)
     try {
       const result = await importExams(file)
@@ -160,6 +178,23 @@ export default function ExamsPage() {
       void queryClient.invalidateQueries({ queryKey: ['exams'] })
     } catch (e) {
       setImportError(e instanceof Error ? e.message : 'Import failed')
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  async function handleImportFullFile(file: File) {
+    setImporting(true)
+    setImportResult(null)
+    setFullImportResult(null)
+    setImportError(null)
+    try {
+      const result = await importFullDataset(file)
+      setFullImportResult(result)
+      void queryClient.invalidateQueries({ queryKey: ['exams'] })
+      void queryClient.invalidateQueries({ queryKey: ['editais'] })
+    } catch (e) {
+      setImportError(e instanceof Error ? e.message : 'Full import failed')
     } finally {
       setImporting(false)
     }
@@ -179,6 +214,17 @@ export default function ExamsPage() {
           e.target.value = ''
         }}
       />
+      <input
+        ref={importFullInputRef}
+        type="file"
+        accept=".json,application/json"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          if (file) void handleImportFullFile(file)
+          e.target.value = ''
+        }}
+      />
 
       {/* Page header */}
       <div className="flex items-center justify-between mb-6">
@@ -195,6 +241,22 @@ export default function ExamsPage() {
           >
             <FolderUp className="w-4 h-4" />
             {importing ? 'Importing…' : 'Import JSON'}
+          </button>
+          <button
+            onClick={() => importFullInputRef.current?.click()}
+            disabled={importing}
+            className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg hover:bg-indigo-100 disabled:opacity-50 transition-colors shadow-sm"
+          >
+            <FolderUp className="w-4 h-4" />
+            {importing ? 'Importing…' : 'Import Full'}
+          </button>
+          <button
+            onClick={() => void exportFullDataset().catch((e) => setExportError(e instanceof Error ? e.message : 'Export failed'))}
+            disabled={exporting}
+            className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg hover:bg-indigo-100 disabled:opacity-50 transition-colors shadow-sm"
+          >
+            <Download className="w-4 h-4" />
+            Export Full
           </button>
 
           {/* Export */}
@@ -249,6 +311,24 @@ export default function ExamsPage() {
           <button
             onClick={() => setImportResult(null)}
             className="ml-auto text-green-500 hover:text-green-700 transition-colors"
+          >
+            ×
+          </button>
+        </div>
+      )}
+      {fullImportResult && (
+        <div className="mb-4 flex items-start gap-3 px-4 py-3 bg-indigo-50 border border-indigo-200 rounded-lg text-sm text-indigo-800">
+          <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0 text-indigo-600" />
+          <div>
+            <p className="font-medium">Full import complete</p>
+            <p className="text-indigo-700 mt-0.5">
+              {fullImportResult.editais_created} edital(is) created, {fullImportResult.exams_created} exam(s) created, {fullImportResult.questions_created} question(s) imported
+              {fullImportResult.questions_enrichment_updated > 0 && `, ${fullImportResult.questions_enrichment_updated} enrichment updated`}
+            </p>
+          </div>
+          <button
+            onClick={() => setFullImportResult(null)}
+            className="ml-auto text-indigo-500 hover:text-indigo-700 transition-colors"
           >
             ×
           </button>

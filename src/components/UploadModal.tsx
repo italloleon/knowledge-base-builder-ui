@@ -8,13 +8,14 @@ import JobStatusBadge from './JobStatusBadge'
 
 interface Props {
   onClose: () => void
+  defaultCategory?: DocumentCategory
 }
 
 type Tab = 'file' | 'url'
 
 const ACTIVE_STATUSES = new Set(['pending', 'processing'])
 
-export default function UploadModal({ onClose }: Props) {
+export default function UploadModal({ onClose, defaultCategory = 'prova' }: Props) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
 
@@ -22,7 +23,7 @@ export default function UploadModal({ onClose }: Props) {
   const [dragOver, setDragOver] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [urlValue, setUrlValue] = useState('')
-  const [category, setCategory] = useState<DocumentCategory>('prova')
+  const [category, setCategory] = useState<DocumentCategory>(defaultCategory)
   const [jobInfo, setJobInfo] = useState<IngestResponse | null>(null)
   const [urlError, setUrlError] = useState('')
 
@@ -43,7 +44,11 @@ export default function UploadModal({ onClose }: Props) {
     mutationFn: (file: File) => uploadFile(file, category),
     onSuccess: (data) => {
       setJobInfo(data)
-      void queryClient.invalidateQueries({ queryKey: ['exams'] })
+      if (category === 'edital') {
+        void queryClient.invalidateQueries({ queryKey: ['editais'] })
+      } else {
+        void queryClient.invalidateQueries({ queryKey: ['exams'] })
+      }
     },
   })
 
@@ -51,7 +56,11 @@ export default function UploadModal({ onClose }: Props) {
     mutationFn: (url: string) => ingestUrl(url, category),
     onSuccess: (data) => {
       setJobInfo(data)
-      void queryClient.invalidateQueries({ queryKey: ['exams'] })
+      if (category === 'edital') {
+        void queryClient.invalidateQueries({ queryKey: ['editais'] })
+      } else {
+        void queryClient.invalidateQueries({ queryKey: ['exams'] })
+      }
     },
   })
 
@@ -90,12 +99,15 @@ export default function UploadModal({ onClose }: Props) {
   const isJobActive = jobStatus ? ACTIVE_STATUSES.has(jobStatus.status) : false
   const isJobDone = jobStatus?.status === 'completed' || jobStatus?.status === 'partial'
 
-  const handleViewExam = () => {
+  const handleViewDocument = () => {
+    const editalId = jobStatus?.edital_id ?? jobInfo?.edital_id
     const examId = jobStatus?.exam_id ?? jobInfo?.exam_id
-    if (examId) {
+    if (editalId) {
+      navigate(`/editais/${editalId}`)
+    } else if (examId) {
       navigate(`/exams/${examId}`)
-      onClose()
     }
+    onClose()
   }
 
   return (
@@ -116,7 +128,9 @@ export default function UploadModal({ onClose }: Props) {
       <div className="relative w-full max-w-lg bg-white rounded-2xl shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-          <h2 className="text-lg font-semibold text-slate-900">Ingest Exam</h2>
+          <h2 className="text-lg font-semibold text-slate-900">
+            {category === 'edital' ? 'Ingerir Edital' : 'Ingerir Prova'}
+          </h2>
           <button
             onClick={onClose}
             className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
@@ -274,7 +288,8 @@ export default function UploadModal({ onClose }: Props) {
               job={jobStatus ?? null}
               jobId={jobInfo.job_id}
               isLoading={isJobActive || jobStatus === undefined}
-              onViewExam={isJobDone ? handleViewExam : undefined}
+              category={category}
+              onViewDocument={isJobDone ? handleViewDocument : undefined}
             />
           )}
 
@@ -318,10 +333,11 @@ interface JobStatusPanelProps {
   job: Job | null
   jobId: string
   isLoading: boolean
-  onViewExam?: () => void
+  category: DocumentCategory
+  onViewDocument?: () => void
 }
 
-function JobStatusPanel({ job, jobId, isLoading, onViewExam }: JobStatusPanelProps) {
+function JobStatusPanel({ job, jobId, isLoading, category, onViewDocument }: JobStatusPanelProps) {
   const status = job?.status
 
   return (
@@ -412,13 +428,13 @@ function JobStatusPanel({ job, jobId, isLoading, onViewExam }: JobStatusPanelPro
         </div>
       )}
 
-      {/* View Exam button */}
-      {onViewExam && (
+      {/* View document button */}
+      {onViewDocument && (
         <button
-          onClick={onViewExam}
+          onClick={onViewDocument}
           className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
         >
-          View Exam Questions
+          {category === 'edital' ? 'Ver Edital' : 'View Exam Questions'}
         </button>
       )}
     </div>
