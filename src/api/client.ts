@@ -1,3 +1,21 @@
+// ─── Auth token storage (in-memory; refresh token in localStorage) ───────────
+
+let _accessToken: string | null = null
+let _onAuthFailure: (() => void) | null = null
+
+export function setAccessToken(token: string | null) {
+  _accessToken = token
+}
+
+export function setOnAuthFailure(cb: () => void) {
+  _onAuthFailure = cb
+}
+
+export function clearAuth() {
+  _accessToken = null
+  localStorage.removeItem('refresh_token')
+}
+
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export type JobStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'partial'
@@ -14,6 +32,25 @@ export type QuestionType =
   | 'true_false'
   | 'association'
   | 'unknown'
+
+export interface User {
+  id: string
+  email: string
+  full_name: string
+  is_active: boolean
+  created_at: string
+}
+
+export interface TokenResponse {
+  access_token: string
+  refresh_token: string
+  token_type: string
+}
+
+export interface AccessTokenResponse {
+  access_token: string
+  token_type: string
+}
 
 export interface IngestResponse {
   job_id: string
@@ -39,6 +76,7 @@ export interface Edital {
   id: string
   filename: string
   file_hash: string
+  uploaded_by: User | null
   numero_edital: string | null
   ano: number | null
   edition_name: string | null
@@ -101,6 +139,7 @@ export interface Exam {
   filename: string
   file_hash: string
   edital_id: string | null
+  uploaded_by: User | null
   question_count: number
   enriched_count: number
   created_at: string
@@ -208,14 +247,75 @@ function apiPath(path: string): string {
   return `${API_PREFIX}${path}`
 }
 
+let _isRefreshing = false
+let _refreshPromise: Promise<string | null> | null = null
+
+async function tryRefresh(): Promise<string | null> {
+  const stored = localStorage.getItem('refresh_token')
+  if (!stored) return null
+  try {
+    const res = await fetch(apiPath('/auth/refresh'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: stored }),
+    })
+    if (!res.ok) {
+      clearAuth()
+      return null
+    }
+    const data = await res.json() as TokenResponse
+    setAccessToken(data.access_token)
+    // Persist rotated refresh token returned by the server
+    localStorage.setItem('refresh_token', data.refresh_token)
+    return data.access_token
+  } catch {
+    clearAuth()
+    return null
+  }
+}
+
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(apiPath(path), {
-    headers: {
-      'Accept': 'application/json',
-      ...(init?.headers ?? {}),
-    },
-    ...init,
-  })
+  const headers: Record<string, string> = {
+    'Accept': 'application/json',
+    ...((init?.headers ?? {}) as Record<string, string>),
+  }
+  if (_accessToken) {
+    headers['Authorization'] = `Bearer ${_accessToken}`
+  }
+
+  const res = await fetch(apiPath(path), { ...init, headers })
+
+  if (res.status === 401) {
+    // Try to refresh once
+    if (!_isRefreshing) {
+      _isRefreshing = true
+      _refreshPromise = tryRefresh().finally(() => { _isRefreshing = false })
+    }
+    const newToken = await _refreshPromise
+    if (!newToken) {
+      _onAuthFailure?.()
+      throw new Error('Session expired')
+    }
+
+    // Retry with fresh token
+    const retryHeaders = { ...headers, 'Authorization': `Bearer ${newToken}` }
+    const retryRes = await fetch(apiPath(path), { ...init, headers: retryHeaders })
+    if (!retryRes.ok) {
+      if (retryRes.status === 401) {
+        clearAuth()
+        _onAuthFailure?.()
+        throw new Error('Session expired')
+      }
+      let message = `HTTP ${retryRes.status}`
+      try {
+        const body = await retryRes.json() as { detail?: string; message?: string }
+        message = body.detail ?? body.message ?? message
+      } catch { /* ignore */ }
+      throw new Error(message)
+    }
+    if (retryRes.status === 204) return undefined as T
+    return retryRes.json() as Promise<T>
+  }
 
   if (!res.ok) {
     let message = `HTTP ${res.status}`
@@ -228,7 +328,87 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(message)
   }
 
+  if (res.status === 204) return undefined as T
   return res.json() as Promise<T>
+}
+
+// ─── Auth endpoints ──────────────────────────────────────────────────────────
+
+export async function login(email: string, password: string): Promise<TokenResponse> {
+  const res = await fetch(apiPath('/auth/login'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  })
+  if (!res.ok) {
+    let message = `HTTP ${res.status}`
+    try {
+      const body = await res.json() as { detail?: string }
+      message = body.detail ?? message
+    } catch { /* ignore */ }
+    throw new Error(message)
+  }
+  return res.json() as Promise<TokenResponse>
+}
+
+export async function refreshToken(raw: string): Promise<TokenResponse> {
+  const res = await fetch(apiPath('/auth/refresh'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refresh_token: raw }),
+  })
+  if (!res.ok) throw new Error('Refresh failed')
+  return res.json() as Promise<TokenResponse>
+}
+
+export async function logoutApi(refreshTokenRaw: string): Promise<void> {
+  await apiFetch('/auth/logout', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refresh_token: refreshTokenRaw }),
+  })
+}
+
+// ─── Users endpoints ─────────────────────────────────────────────────────────
+
+export async function getMe(): Promise<User> {
+  return apiFetch<User>('/users/me')
+}
+
+export async function listUsers(): Promise<User[]> {
+  return apiFetch<User[]>('/users')
+}
+
+export interface CreateUserPayload {
+  email: string
+  full_name: string
+  password: string
+}
+
+export async function createUser(payload: CreateUserPayload): Promise<User> {
+  return apiFetch<User>('/users', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
+export interface UpdateUserPayload {
+  full_name?: string
+  email?: string
+  password?: string
+}
+
+export async function updateUser(id: string, payload: UpdateUserPayload): Promise<User> {
+  return apiFetch<User>(`/users/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function deactivateUser(id: string): Promise<void> {
+  return apiFetch<void>(`/users/${id}`, { method: 'DELETE' })
 }
 
 // ─── Ingest endpoints ────────────────────────────────────────────────────────
@@ -291,15 +471,7 @@ export async function enrichEditalFromUpload(
 }
 
 export async function deleteEdital(id: string): Promise<void> {
-  const res = await fetch(apiPath(`/editais/${id}`), { method: 'DELETE' })
-  if (!res.ok) {
-    let message = `HTTP ${res.status}`
-    try {
-      const body = await res.json() as { detail?: string }
-      message = body.detail ?? message
-    } catch { /* ignore */ }
-    throw new Error(message)
-  }
+  return apiFetch<void>(`/editais/${id}`, { method: 'DELETE' })
 }
 
 export async function listEditalExams(editalId: string): Promise<Exam[]> {
@@ -403,7 +575,9 @@ export async function importExams(file: File): Promise<ImportResult> {
 }
 
 export async function exportExams(format: 'json' | 'csv'): Promise<void> {
-  const res = await fetch(apiPath(`/exams/export?format=${format}`))
+  const headers: Record<string, string> = { 'Accept': 'application/json' }
+  if (_accessToken) headers['Authorization'] = `Bearer ${_accessToken}`
+  const res = await fetch(apiPath(`/exams/export?format=${format}`), { headers })
   if (!res.ok) {
     throw new Error(`Export failed: HTTP ${res.status}`)
   }
@@ -428,7 +602,9 @@ export async function importFullDataset(file: File): Promise<FullImportResult> {
 }
 
 export async function exportFullDataset(): Promise<void> {
-  const res = await fetch(apiPath('/import/export/full'))
+  const headers: Record<string, string> = { 'Accept': 'application/json' }
+  if (_accessToken) headers['Authorization'] = `Bearer ${_accessToken}`
+  const res = await fetch(apiPath('/import/export/full'), { headers })
   if (!res.ok) {
     throw new Error(`Export failed: HTTP ${res.status}`)
   }
@@ -444,15 +620,7 @@ export async function exportFullDataset(): Promise<void> {
 }
 
 export async function deleteExam(examId: string): Promise<void> {
-  const res = await fetch(apiPath(`/exams/${examId}`), { method: 'DELETE' })
-  if (!res.ok) {
-    let message = `HTTP ${res.status}`
-    try {
-      const body = await res.json() as { detail?: string }
-      message = body.detail ?? message
-    } catch { /* ignore */ }
-    throw new Error(message)
-  }
+  return apiFetch<void>(`/exams/${examId}`, { method: 'DELETE' })
 }
 
 // ─── Gabarito ────────────────────────────────────────────────────────────────
