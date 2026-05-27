@@ -142,7 +142,20 @@ export interface Exam {
   uploaded_by: User | null
   question_count: number
   enriched_count: number
+  nome: string | null
+  periodo: 'manha' | 'tarde' | null
+  tipo: number | null
+  cor: string | null
+  tipo_prova: string | null
   created_at: string
+}
+
+export interface ExamUpdatePayload {
+  nome?: string | null
+  periodo?: 'manha' | 'tarde' | null
+  tipo?: number | null
+  cor?: string | null
+  tipo_prova?: string | null
 }
 
 export interface QuestionItem {
@@ -206,6 +219,8 @@ export interface Question {
   enrichment: QuestionEnrichment | null
   explanation: QuestionExplanation | null
   explanation_flagged: boolean
+  explanation_insight: string | null
+  images: string[] | null
   raw_block?: string
   created_at: string
 }
@@ -250,23 +265,14 @@ function apiPath(path: string): string {
 let _isRefreshing = false
 let _refreshPromise: Promise<string | null> | null = null
 
+/** Dedupe concurrent refresh calls with the same token (React Strict Mode runs effects twice). */
+const _refreshSingleFlight = new Map<string, Promise<TokenResponse>>()
+
 async function tryRefresh(): Promise<string | null> {
   const stored = localStorage.getItem('refresh_token')
   if (!stored) return null
   try {
-    const res = await fetch(apiPath('/auth/refresh'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh_token: stored }),
-    })
-    if (!res.ok) {
-      clearAuth()
-      return null
-    }
-    const data = await res.json() as TokenResponse
-    setAccessToken(data.access_token)
-    // Persist rotated refresh token returned by the server
-    localStorage.setItem('refresh_token', data.refresh_token)
+    const data = await refreshToken(stored)
     return data.access_token
   } catch {
     clearAuth()
@@ -352,13 +358,28 @@ export async function login(email: string, password: string): Promise<TokenRespo
 }
 
 export async function refreshToken(raw: string): Promise<TokenResponse> {
-  const res = await fetch(apiPath('/auth/refresh'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ refresh_token: raw }),
+  const existing = _refreshSingleFlight.get(raw)
+  if (existing) return existing
+
+  const promise = (async (): Promise<TokenResponse> => {
+    const res = await fetch(apiPath('/auth/refresh'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: raw }),
+    })
+    if (!res.ok) throw new Error('Refresh failed')
+    const data = await res.json() as TokenResponse
+    setAccessToken(data.access_token)
+    localStorage.setItem('refresh_token', data.refresh_token)
+    return data
+  })()
+
+  _refreshSingleFlight.set(raw, promise)
+  promise.finally(() => {
+    _refreshSingleFlight.delete(raw)
   })
-  if (!res.ok) throw new Error('Refresh failed')
-  return res.json() as Promise<TokenResponse>
+
+  return promise
 }
 
 export async function logoutApi(refreshTokenRaw: string): Promise<void> {
@@ -437,6 +458,14 @@ export async function getJob(id: string): Promise<Job> {
   return apiFetch<Job>(`/jobs/${id}`)
 }
 
+export async function listJobs(activeOnly = false, limit = 50): Promise<Job[]> {
+  return apiFetch<Job[]>(`/jobs?active_only=${activeOnly}&limit=${limit}`)
+}
+
+export async function cancelJob(id: string): Promise<Job> {
+  return apiFetch<Job>(`/jobs/${id}/cancel`, { method: 'POST' })
+}
+
 // ─── Editais ─────────────────────────────────────────────────────────────────
 
 export async function listEditais(): Promise<Edital[]> {
@@ -452,8 +481,9 @@ export interface EditalEnrichResponse {
   job_id: string
 }
 
-export async function enrichEdital(editalId: string): Promise<EditalEnrichResponse> {
-  return apiFetch<EditalEnrichResponse>(`/editais/${editalId}/enrich`, {
+export async function enrichEdital(editalId: string, provider?: string): Promise<EditalEnrichResponse> {
+  const qs = provider ? `?provider=${encodeURIComponent(provider)}` : ''
+  return apiFetch<EditalEnrichResponse>(`/editais/${editalId}/enrich${qs}`, {
     method: 'POST',
   })
 }
@@ -461,10 +491,12 @@ export async function enrichEdital(editalId: string): Promise<EditalEnrichRespon
 export async function enrichEditalFromUpload(
   editalId: string,
   file: File,
+  provider?: string,
 ): Promise<EditalEnrichResponse> {
+  const qs = provider ? `?provider=${encodeURIComponent(provider)}` : ''
   const form = new FormData()
   form.append('file', file)
-  return apiFetch<EditalEnrichResponse>(`/editais/${editalId}/enrich-upload`, {
+  return apiFetch<EditalEnrichResponse>(`/editais/${editalId}/enrich-upload${qs}`, {
     method: 'POST',
     body: form,
   })
@@ -547,6 +579,50 @@ export async function explainExam(
   })
 }
 
+export interface ExplanationRefineResponse {
+  message: string
+  question_id: string
+}
+
+export async function refineExplanation(
+  questionId: string,
+  insight: string,
+  provider?: EnrichProvider,
+): Promise<ExplanationRefineResponse> {
+  return apiFetch<ExplanationRefineResponse>(`/questions/${questionId}/explanation/refine`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ insight, provider: provider ?? null }),
+  })
+}
+
+export async function explainQuestion(
+  questionId: string,
+  provider?: string | null,
+): Promise<ExplanationRefineResponse> {
+  return apiFetch<ExplanationRefineResponse>(`/questions/${questionId}/explain`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider: provider ?? null }),
+  })
+}
+
+export interface UpdateGabaritoResponse {
+  question_id: string
+  gabarito: string | null
+}
+
+export async function updateQuestionGabarito(
+  questionId: string,
+  gabarito: string | null,
+): Promise<UpdateGabaritoResponse> {
+  return apiFetch<UpdateGabaritoResponse>(`/questions/${questionId}/gabarito`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ gabarito }),
+  })
+}
+
 export interface ImportResult {
   exams_created: number
   exams_existing: number
@@ -623,6 +699,14 @@ export async function deleteExam(examId: string): Promise<void> {
   return apiFetch<void>(`/exams/${examId}`, { method: 'DELETE' })
 }
 
+export async function updateExam(examId: string, payload: ExamUpdatePayload): Promise<Exam> {
+  return apiFetch<Exam>(`/exams/${examId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
 // ─── Gabarito ────────────────────────────────────────────────────────────────
 
 export interface GabaritoCaderno {
@@ -658,6 +742,53 @@ export async function applyGabarito(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ answers }),
+  })
+}
+
+// ─── Admin Settings ──────────────────────────────────────────────────────────
+
+export interface ProviderMeta {
+  name: string
+  label: string
+  default_model: string
+}
+
+export type SettingSource = 'db' | 'env' | 'default' | 'none'
+
+export interface SecretSetting {
+  key: string
+  label: string
+  is_secret: true
+  is_configured: boolean
+  source: SettingSource
+}
+
+export interface PlainSetting {
+  key: string
+  label: string
+  is_secret: false
+  value: string
+  source: SettingSource
+}
+
+export type SettingItem = SecretSetting | PlainSetting
+
+export interface SettingsResponse {
+  settings: SettingItem[]
+  providers: ProviderMeta[]
+}
+
+export async function getAdminSettings(): Promise<SettingsResponse> {
+  return apiFetch<SettingsResponse>('/admin/settings')
+}
+
+export async function updateAdminSettings(
+  patches: { key: string; value: string }[],
+): Promise<SettingsResponse> {
+  return apiFetch<SettingsResponse>('/admin/settings', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ settings: patches }),
   })
 }
 

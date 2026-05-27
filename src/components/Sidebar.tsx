@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { BookOpen, Database, LogOut, ScrollText, Users } from 'lucide-react'
+import { Activity, BookOpen, Database, LogOut, ScrollText, Settings, Users } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
@@ -9,11 +9,11 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
       : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 border-l-2 border-transparent pl-[10px]'
   }`
 
-export default function Sidebar() {
+export default function Sidebar({ onClose }: { onClose?: () => void }) {
   const { user, logout } = useAuth()
 
   return (
-    <aside className="w-56 shrink-0 bg-white border-r border-slate-200 flex flex-col h-full">
+    <aside className="w-64 md:w-56 shrink-0 bg-white border-r border-slate-200 flex flex-col h-full">
       {/* Logo */}
       <div className="px-5 py-5 border-b border-slate-200">
         <div className="flex items-center gap-2.5">
@@ -29,19 +29,29 @@ export default function Sidebar() {
 
       {/* Nav */}
       <nav className="flex-1 px-3 py-4 space-y-0.5" aria-label="Main navigation">
-        <NavLink to="/editais" className={navLinkClass}>
+        <NavLink to="/editais" className={navLinkClass} onClick={onClose}>
           <ScrollText className="w-4 h-4 shrink-0" />
           Editais
         </NavLink>
 
-        <NavLink to="/exams" className={navLinkClass}>
+        <NavLink to="/exams" className={navLinkClass} onClick={onClose}>
           <BookOpen className="w-4 h-4 shrink-0" />
           Provas
         </NavLink>
 
-        <NavLink to="/users" className={navLinkClass}>
+        <NavLink to="/users" className={navLinkClass} onClick={onClose}>
           <Users className="w-4 h-4 shrink-0" />
           Usuários
+        </NavLink>
+
+        <NavLink to="/admin/jobs" className={navLinkClass} onClick={onClose}>
+          <Activity className="w-4 h-4 shrink-0" />
+          Jobs
+        </NavLink>
+
+        <NavLink to="/settings" className={navLinkClass} onClick={onClose}>
+          <Settings className="w-4 h-4 shrink-0" />
+          Settings
         </NavLink>
       </nav>
 

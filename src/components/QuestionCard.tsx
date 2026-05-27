@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronDown, ChevronUp, ArrowUpRight, AlertTriangle, MessageSquare, CheckCircle2 } from 'lucide-react'
+import { ChevronDown, ChevronUp, ArrowUpRight, AlertTriangle, MessageSquare, CheckCircle2, Image } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import type { Question } from '../api/client'
 import ConfidenceBar from './ConfidenceBar'
@@ -40,6 +40,11 @@ export default function QuestionCard({ question, showNavigate = true }: Props) {
             Gabarito: {question.gabarito}
           </span>
         )}
+        {question.images && question.images.length > 0 && (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-600 border border-blue-200">
+            <Image className="w-3 h-3" />{question.images.length}
+          </span>
+        )}
         {question.explanation && (
           question.explanation.flagged ? (
             <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-600 border border-amber-200">
@@ -60,7 +65,7 @@ export default function QuestionCard({ question, showNavigate = true }: Props) {
           <p
             className={`text-sm text-slate-800 leading-relaxed whitespace-pre-wrap ${!expanded ? 'line-clamp-3' : ''}`}
           >
-            {question.enunciado}
+            {question.enunciado.replace(/<!--\s*image:\d+\s*-->/g, '').trim()}
           </p>
           {question.enunciado.length > 200 && (
             <button

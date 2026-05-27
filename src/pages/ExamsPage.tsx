@@ -201,7 +201,7 @@ export default function ExamsPage() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto px-6 py-8">
+    <div className="max-w-5xl mx-auto px-4 py-6 sm:px-6 sm:py-8">
       {/* Hidden file input for JSON import */}
       <input
         ref={importInputRef}
@@ -227,12 +227,12 @@ export default function ExamsPage() {
       />
 
       {/* Page header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Exams</h1>
           <p className="text-sm text-slate-500 mt-0.5">Ingested ENARE exam documents</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {/* Import JSON */}
           <button
             onClick={() => importInputRef.current?.click()}
@@ -240,7 +240,8 @@ export default function ExamsPage() {
             className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50 transition-colors shadow-sm"
           >
             <FolderUp className="w-4 h-4" />
-            {importing ? 'Importing…' : 'Import JSON'}
+            <span className="hidden sm:inline">{importing ? 'Importing…' : 'Import JSON'}</span>
+            <span className="sm:hidden">{importing ? '…' : 'JSON'}</span>
           </button>
           <button
             onClick={() => importFullInputRef.current?.click()}
@@ -248,7 +249,8 @@ export default function ExamsPage() {
             className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg hover:bg-indigo-100 disabled:opacity-50 transition-colors shadow-sm"
           >
             <FolderUp className="w-4 h-4" />
-            {importing ? 'Importing…' : 'Import Full'}
+            <span className="hidden sm:inline">{importing ? 'Importing…' : 'Import Full'}</span>
+            <span className="sm:hidden">{importing ? '…' : 'Full'}</span>
           </button>
           <button
             onClick={() => void exportFullDataset().catch((e) => setExportError(e instanceof Error ? e.message : 'Export failed'))}
@@ -256,13 +258,14 @@ export default function ExamsPage() {
             className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg hover:bg-indigo-100 disabled:opacity-50 transition-colors shadow-sm"
           >
             <Download className="w-4 h-4" />
-            Export Full
+            <span className="hidden sm:inline">Export Full</span>
+            <span className="sm:hidden">Full</span>
           </button>
 
           {/* Export */}
           {exams && exams.length > 0 && (
             <div className="flex items-center rounded-lg border border-slate-200 overflow-hidden shadow-sm">
-              <span className="flex items-center gap-1.5 px-3 py-2 text-sm text-slate-500 bg-white border-r border-slate-200">
+              <span className="hidden sm:flex items-center gap-1.5 px-3 py-2 text-sm text-slate-500 bg-white border-r border-slate-200">
                 <Download className="w-4 h-4" />
                 {exporting ? 'Exporting…' : 'Export'}
               </span>

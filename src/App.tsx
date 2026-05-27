@@ -11,6 +11,8 @@ import ExamDetailPage from './pages/ExamDetailPage'
 import QuestionDetailPage from './pages/QuestionDetailPage'
 import ParseErrorsPage from './pages/ParseErrorsPage'
 import UsersPage from './pages/UsersPage'
+import SettingsPage from './pages/SettingsPage'
+import AdminJobsPage from './pages/AdminJobsPage'
 
 function AppRoutes() {
   const navigate = useNavigate()
@@ -36,6 +38,8 @@ function AppRoutes() {
           <Route path="questions/:id" element={<QuestionDetailPage />} />
           <Route path="exams/:id/errors" element={<ParseErrorsPage />} />
           <Route path="users" element={<UsersPage />} />
+          <Route path="settings" element={<SettingsPage />} />
+          <Route path="admin/jobs" element={<AdminJobsPage />} />
           <Route path="*" element={<Navigate to="/editais" replace />} />
         </Route>
       </Routes>

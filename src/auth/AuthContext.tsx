@@ -40,11 +40,7 @@ export function AuthProvider({ children, onAuthFailure }: { children: ReactNode;
       return
     }
     apiRefresh(stored)
-      .then(({ access_token, refresh_token }) => {
-        setAccessToken(access_token)
-        localStorage.setItem('refresh_token', refresh_token)
-        return getMe()
-      })
+      .then(() => getMe())
       .then(setUser)
       .catch(() => {
         clearAuth()

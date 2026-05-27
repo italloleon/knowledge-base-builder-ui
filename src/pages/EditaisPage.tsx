@@ -168,7 +168,7 @@ export default function EditaisPage() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto px-6 py-8">
+    <div className="max-w-5xl mx-auto px-4 py-6 sm:px-6 sm:py-8">
       <input
         ref={importFullInputRef}
         type="file"
@@ -180,12 +180,12 @@ export default function EditaisPage() {
           e.target.value = ''
         }}
       />
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Editais</h1>
           <p className="text-sm text-slate-500 mt-0.5">Documentos de edital ENARE ingeridos</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => importFullInputRef.current?.click()}
             disabled={importing}

@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ChevronRight,
   RefreshCw,
@@ -13,8 +13,14 @@ import {
   Tag,
   BarChart2,
   BookOpen,
+  MessageSquarePlus,
+  CheckCircle,
+  Pencil,
+  Mic,
+  MicOff,
+  Zap,
 } from 'lucide-react'
-import { getQuestion } from '../api/client'
+import { getQuestion, refineExplanation, explainQuestion, updateQuestionGabarito } from '../api/client'
 import type { QuestionEnrichment, QuestionExplanation } from '../api/client'
 import ConfidenceBar from '../components/ConfidenceBar'
 import QuestionTypeBadge from '../components/QuestionTypeBadge'
@@ -239,6 +245,257 @@ function ExplanationPanel({ explanation }: { explanation: QuestionExplanation })
   )
 }
 
+// ─── Web Speech API hook ─────────────────────────────────────────────────────
+
+interface SpeechRecognitionInstance {
+  lang: string
+  continuous: boolean
+  interimResults: boolean
+  onresult: ((event: SpeechResultEvent) => void) | null
+  onend: (() => void) | null
+  onerror: (() => void) | null
+  start(): void
+  stop(): void
+}
+
+interface SpeechResultEvent {
+  results: { isFinal: boolean; 0: { transcript: string } }[]
+  resultIndex: number
+}
+
+function useVoiceInput(lang = 'pt-BR') {
+  const [listening, setListening] = useState(false)
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null)
+
+  const supported =
+    typeof window !== 'undefined' &&
+    ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)
+
+  const start = useCallback(
+    (onTranscript: (text: string) => void) => {
+      const win = window as typeof window & {
+        SpeechRecognition?: new () => SpeechRecognitionInstance
+        webkitSpeechRecognition?: new () => SpeechRecognitionInstance
+      }
+      const SR = win.SpeechRecognition ?? win.webkitSpeechRecognition
+      if (!SR) return
+
+      const recognition = new SR()
+      recognition.lang = lang
+      recognition.continuous = true
+      recognition.interimResults = false
+
+      recognition.onresult = (event: SpeechResultEvent) => {
+        const transcript = Array.from(event.results)
+          .slice(event.resultIndex)
+          .filter((r) => r.isFinal)
+          .map((r) => r[0].transcript)
+          .join(' ')
+          .trim()
+        if (transcript) onTranscript(transcript)
+      }
+      recognition.onend = () => setListening(false)
+      recognition.onerror = () => setListening(false)
+
+      recognitionRef.current = recognition
+      recognition.start()
+      setListening(true)
+    },
+    [lang],
+  )
+
+  const stop = useCallback(() => {
+    recognitionRef.current?.stop()
+    setListening(false)
+  }, [])
+
+  return { listening, supported, start, stop }
+}
+
+// ─── Specialist insight panel ─────────────────────────────────────────────────
+
+function ExplanationInsightPanel({
+  questionId,
+  currentInsight,
+}: {
+  questionId: string
+  currentInsight: string | null
+}) {
+  const queryClient = useQueryClient()
+  const [expanded, setExpanded] = useState(false)
+  const [text, setText] = useState(currentInsight ?? '')
+  const [queued, setQueued] = useState(false)
+  const { listening, supported, start, stop } = useVoiceInput()
+
+  const mutation = useMutation({
+    mutationFn: (insight: string) => refineExplanation(questionId, insight),
+    onSuccess: () => {
+      setQueued(true)
+      setExpanded(false)
+      void queryClient.invalidateQueries({ queryKey: ['question', questionId] })
+      setTimeout(() => setQueued(false), 6000)
+    },
+  })
+
+  const handleVoiceToggle = () => {
+    if (listening) {
+      stop()
+    } else {
+      start((transcript) => {
+        setText((prev) => (prev.trim() ? `${prev} ${transcript}` : transcript))
+      })
+    }
+  }
+
+  return (
+    <div className="bg-gradient-to-br from-blue-50 to-slate-50 border border-blue-200 rounded-xl px-5 py-4 space-y-3">
+      {/* Header */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <MessageSquarePlus className="w-4 h-4 text-blue-500" />
+          <h2 className="text-xs font-semibold text-blue-700 uppercase tracking-wide">
+            Insight do Especialista
+          </h2>
+        </div>
+        {!expanded && (
+          <button
+            onClick={() => {
+              setText(currentInsight ?? '')
+              setExpanded(true)
+            }}
+            className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
+          >
+            <Pencil className="w-3 h-3" />
+            {currentInsight ? 'Editar' : 'Adicionar insight'}
+          </button>
+        )}
+      </div>
+
+      {/* Existing insight (read-only when collapsed) */}
+      {currentInsight && !expanded && (
+        <blockquote className="border-l-2 border-blue-300 pl-3 text-sm text-slate-700 leading-relaxed italic">
+          {currentInsight}
+        </blockquote>
+      )}
+
+      {/* Queued confirmation */}
+      {queued && (
+        <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+          <CheckCircle className="w-4 h-4 shrink-0" />
+          Refinamento em fila. A nova explicação será gerada em breve.
+        </div>
+      )}
+
+      {/* Edit form */}
+      {expanded && (
+        <div className="space-y-3">
+          {/* Textarea with listening indicator */}
+          <div className="relative">
+            <textarea
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              rows={5}
+              placeholder="Descreva o que deve ser corrigido ou complementado na explicação. Ex: A justificativa da alternativa B confunde a Resolução COFEN 358/2009 com a 564/2017..."
+              className={`w-full text-sm text-slate-800 placeholder-slate-400 border rounded-lg px-3 py-2.5 bg-white resize-none focus:outline-none focus:ring-2 leading-relaxed transition-colors ${
+                listening
+                  ? 'border-red-300 focus:ring-red-200 pr-10'
+                  : 'border-blue-200 focus:ring-blue-300'
+              }`}
+            />
+            {/* Pulsing mic indicator inside textarea when listening */}
+            {listening && (
+              <span className="absolute top-2.5 right-2.5 flex h-4 w-4">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-4 w-4 bg-red-500" />
+              </span>
+            )}
+          </div>
+
+          {/* Listening label */}
+          {listening && (
+            <p className="text-xs text-red-600 font-medium flex items-center gap-1.5">
+              <Mic className="w-3 h-3" />
+              Ouvindo... fale agora. Clique em parar quando terminar.
+            </p>
+          )}
+
+          {/* Action row */}
+          <div className="flex items-center gap-2">
+            {/* Voice button */}
+            {supported ? (
+              <button
+                type="button"
+                onClick={handleVoiceToggle}
+                title={listening ? 'Parar gravação' : 'Falar insight (pt-BR)'}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                  listening
+                    ? 'text-red-600 border-red-200 bg-red-50 hover:bg-red-100'
+                    : 'text-slate-500 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                {listening ? (
+                  <>
+                    <MicOff className="w-3.5 h-3.5" />
+                    Parar
+                  </>
+                ) : (
+                  <>
+                    <Mic className="w-3.5 h-3.5" />
+                    Falar
+                  </>
+                )}
+              </button>
+            ) : (
+              <span
+                title="Web Speech API não suportada neste navegador (use Chrome ou Edge)"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-400 border border-slate-200 rounded-lg cursor-not-allowed"
+              >
+                <MicOff className="w-3.5 h-3.5" />
+                Voz indisponível
+              </span>
+            )}
+
+            <div className="flex-1" />
+
+            <button
+              onClick={() => {
+                if (listening) stop()
+                setExpanded(false)
+              }}
+              className="px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={() => mutation.mutate(text)}
+              disabled={!text.trim() || mutation.isPending || listening}
+              className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors"
+            >
+              {mutation.isPending ? (
+                <>
+                  <RefreshCw className="w-3 h-3 animate-spin" />
+                  Enviando...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-3 h-3" />
+                  Gerar nova explicação
+                </>
+              )}
+            </button>
+          </div>
+
+          {mutation.isError && (
+            <p className="text-xs text-red-600">
+              {mutation.error instanceof Error ? mutation.error.message : 'Erro ao enviar insight'}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function DetailSkeleton() {
   return (
     <div className="space-y-6 animate-pulse">
@@ -273,6 +530,138 @@ function DetailSkeleton() {
   )
 }
 
+// ─── Gabarito editor ─────────────────────────────────────────────────────────
+
+function GabaritoEditor({
+  questionId,
+  current,
+}: {
+  questionId: string
+  current: string | null
+}) {
+  const queryClient = useQueryClient()
+  const [editing, setEditing] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  const mutation = useMutation({
+    mutationFn: (g: string | null) => updateQuestionGabarito(questionId, g),
+    onSuccess: () => {
+      setSaved(true)
+      setEditing(false)
+      void queryClient.invalidateQueries({ queryKey: ['question', questionId] })
+      setTimeout(() => setSaved(false), 4000)
+    },
+  })
+
+  if (!editing) {
+    return (
+      <div className="flex items-center gap-2">
+        {current ? (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-50 text-green-700 border border-green-200">
+            Gabarito: {current}
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-500 border border-slate-200">
+            Sem gabarito
+          </span>
+        )}
+        {saved && (
+          <span className="flex items-center gap-1 text-xs text-green-600 font-medium">
+            <CheckCircle className="w-3 h-3" /> Salvo
+          </span>
+        )}
+        <button
+          onClick={() => setEditing(true)}
+          className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600 transition-colors"
+          title="Alterar gabarito"
+        >
+          <Pencil className="w-3 h-3" />
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <span className="text-xs font-medium text-slate-500">Gabarito:</span>
+      {(['A', 'B', 'C', 'D', 'E'] as const).map((letter) => (
+        <button
+          key={letter}
+          onClick={() => mutation.mutate(letter)}
+          disabled={mutation.isPending}
+          className={`w-7 h-7 rounded-full text-xs font-bold border transition-colors ${
+            current === letter
+              ? 'bg-green-100 border-green-400 text-green-700'
+              : 'bg-white border-slate-300 text-slate-600 hover:border-green-400 hover:bg-green-50 hover:text-green-700'
+          }`}
+        >
+          {letter}
+        </button>
+      ))}
+      <button
+        onClick={() => mutation.mutate(null)}
+        disabled={mutation.isPending}
+        className="text-xs text-slate-400 hover:text-red-500 transition-colors px-1"
+        title="Limpar gabarito"
+      >
+        limpar
+      </button>
+      <button
+        onClick={() => setEditing(false)}
+        className="text-xs text-slate-400 hover:text-slate-600 transition-colors"
+      >
+        cancelar
+      </button>
+      {mutation.isPending && <RefreshCw className="w-3 h-3 animate-spin text-slate-400" />}
+      {mutation.isError && (
+        <span className="text-xs text-red-500">Erro ao salvar</span>
+      )}
+    </div>
+  )
+}
+
+// ─── Single-question explain button ──────────────────────────────────────────
+
+function ExplainButton({ questionId }: { questionId: string }) {
+  const queryClient = useQueryClient()
+  const [queued, setQueued] = useState(false)
+
+  const mutation = useMutation({
+    mutationFn: () => explainQuestion(questionId),
+    onSuccess: () => {
+      setQueued(true)
+      setTimeout(() => {
+        setQueued(false)
+        void queryClient.invalidateQueries({ queryKey: ['question', questionId] })
+      }, 8000)
+    },
+  })
+
+  if (queued) {
+    return (
+      <span className="flex items-center gap-1.5 text-xs text-green-700 font-medium bg-green-50 border border-green-200 px-3 py-1.5 rounded-lg">
+        <CheckCircle className="w-3.5 h-3.5" />
+        Explicação em fila…
+      </span>
+    )
+  }
+
+  return (
+    <button
+      onClick={() => mutation.mutate()}
+      disabled={mutation.isPending}
+      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-amber-700 border border-amber-200 bg-amber-50 hover:bg-amber-100 disabled:opacity-50 rounded-lg transition-colors"
+    >
+      {mutation.isPending ? (
+        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+      ) : (
+        <Zap className="w-3.5 h-3.5" />
+      )}
+      Explicar
+    </button>
+  )
+}
+
 export default function QuestionDetailPage() {
   const { id } = useParams<{ id: string }>()
   const questionId = id!
@@ -293,7 +682,7 @@ export default function QuestionDetailPage() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto px-6 py-8">
+    <div className="max-w-3xl mx-auto px-4 py-6 sm:px-6 sm:py-8">
       {/* Breadcrumb */}
       <nav className="flex items-center gap-2 text-sm text-slate-500 mb-6" aria-label="Breadcrumb">
         <Link to="/exams" className="hover:text-blue-600 transition-colors">
@@ -357,11 +746,10 @@ export default function QuestionDetailPage() {
               <span className="text-base font-bold text-slate-900">#{question.number}</span>
               <SectionBadge section={question.section} />
               <QuestionTypeBadge type={question.question_type} />
-              {question.gabarito && (
-                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-50 text-green-700 border border-green-200">
-                  Gabarito: {question.gabarito}
-                </span>
-              )}
+              <GabaritoEditor questionId={question.id} current={question.gabarito} />
+              <div className="ml-auto">
+                <ExplainButton questionId={question.id} />
+              </div>
             </div>
             <div className="flex items-center gap-3">
               <span className="text-xs text-slate-500 font-medium">Confidence</span>
@@ -386,15 +774,42 @@ export default function QuestionDetailPage() {
             <ExplanationPanel explanation={question.explanation} />
           )}
 
+          {/* Specialist insight */}
+          {question.gabarito && (
+            <ExplanationInsightPanel
+              questionId={question.id}
+              currentInsight={question.explanation_insight}
+            />
+          )}
+
           {/* Enunciado */}
           <div className="bg-white border border-slate-200 rounded-xl px-5 py-4">
             <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-3">
               Enunciado
             </h2>
             <p className="text-sm text-slate-800 leading-relaxed whitespace-pre-wrap">
-              {question.enunciado}
+              {question.enunciado.replace(/<!--\s*image:\d+\s*-->/g, '').trim()}
             </p>
           </div>
+
+          {/* Images */}
+          {question.images && question.images.length > 0 && (
+            <div className="bg-white border border-slate-200 rounded-xl px-5 py-4 space-y-3">
+              <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-widest">
+                Imagens
+              </h2>
+              <div className="flex flex-col gap-4">
+                {question.images.map((path, i) => (
+                  <img
+                    key={i}
+                    src={`/api/images/${path}`}
+                    alt={`Figura ${i + 1}`}
+                    className="max-w-full rounded-lg border border-slate-200"
+                  />
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Items */}
           {question.items && question.items.length > 0 && (

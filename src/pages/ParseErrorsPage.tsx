@@ -91,7 +91,7 @@ export default function ParseErrorsPage() {
   })
 
   return (
-    <div className="max-w-4xl mx-auto px-6 py-8">
+    <div className="max-w-4xl mx-auto px-4 py-6 sm:px-6 sm:py-8">
       {/* Breadcrumb */}
       <nav className="flex items-center gap-2 text-sm text-slate-500 mb-6" aria-label="Breadcrumb">
         <Link to="/" className="hover:text-blue-600 transition-colors">

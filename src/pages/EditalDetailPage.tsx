@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -13,6 +13,7 @@ import {
   linkExamToEdital,
   enrichEdital,
   enrichEditalFromUpload,
+  getAdminSettings,
 } from '../api/client'
 import EditalGabaritoModal from '../components/EditalGabaritoModal'
 import type {
@@ -355,8 +356,21 @@ export default function EditalDetailPage() {
   const { id } = useParams<{ id: string }>()
   const queryClient = useQueryClient()
   const [enrichMsg, setEnrichMsg] = useState<string | null>(null)
+  const [enrichProvider, setEnrichProvider] = useState<string>('gemini')
   const [showGabaritoModal, setShowGabaritoModal] = useState(false)
   const annexInputRef = useRef<HTMLInputElement>(null)
+
+  const { data: adminSettings } = useQuery({
+    queryKey: ['admin-settings'],
+    queryFn: getAdminSettings,
+    staleTime: 60_000,
+  })
+
+  useEffect(() => {
+    if (!adminSettings) return
+    const s = adminSettings.settings.find((s) => s.key === 'enrichment_provider')
+    if (s && !s.is_secret) setEnrichProvider(s.value)
+  }, [adminSettings])
 
   const { data: edital, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['edital', id],
@@ -365,7 +379,7 @@ export default function EditalDetailPage() {
   })
 
   const enrichMutation = useMutation({
-    mutationFn: () => enrichEdital(id!),
+    mutationFn: () => enrichEdital(id!, enrichProvider),
     onSuccess: (data) => {
       setEnrichMsg(
         `${data.message} (job: ${data.job_id}). O processamento ocorre em segundo plano — atualize a página em alguns minutos para ver os dados.`,
@@ -378,7 +392,7 @@ export default function EditalDetailPage() {
   })
 
   const enrichFromUploadMutation = useMutation({
-    mutationFn: (file: File) => enrichEditalFromUpload(id!, file),
+    mutationFn: (file: File) => enrichEditalFromUpload(id!, file, enrichProvider),
     onSuccess: (data) => {
       setEnrichMsg(
         `${data.message} (job: ${data.job_id}). O processamento ocorre em segundo plano — atualize a página em alguns minutos para ver os dados.`,
@@ -446,7 +460,16 @@ export default function EditalDetailPage() {
           </div>
         </div>
         <div className="flex flex-col items-stretch sm:items-end gap-2 shrink-0 w-full sm:w-auto">
-          <div className="flex flex-col sm:flex-row gap-2">
+          <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
+            <select
+              value={enrichProvider}
+              onChange={(e) => setEnrichProvider(e.target.value)}
+              className="px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 transition-colors"
+            >
+              {(adminSettings?.providers ?? [{ name: 'gemini', label: 'Google Gemini' }]).map((p) => (
+                <option key={p.name} value={p.name}>{p.label}</option>
+              ))}
+            </select>
             <button
               type="button"
               onClick={() => {
