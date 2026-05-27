@@ -28,7 +28,6 @@ function RelativeTime({ iso }: { iso: string }) {
 
 function JobRow({ job, onCancel }: { job: Job; onCancel: (id: string) => void }) {
   const isActive = ACTIVE.includes(job.status)
-  const isCancelling = false // managed by mutation state in parent
 
   return (
     <tr className="border-t border-slate-100 hover:bg-slate-50 transition-colors">

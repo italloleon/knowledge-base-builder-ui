@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { X, Upload, Link, FileText, CheckCircle, AlertTriangle, XCircle, Loader2, Trash2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { uploadFile, ingestUrl, getJob } from '../api/client'
@@ -26,11 +26,9 @@ interface FileEntry {
 
 function FileRow({
   entry,
-  category,
   onRemove,
 }: {
   entry: FileEntry
-  category: DocumentCategory
   onRemove: () => void
 }) {
   const { data: jobStatus } = useQuery({
@@ -74,7 +72,7 @@ function FileRow({
         )}
 
         {/* Progress bar while processing */}
-        {isActive && jobStatus && jobStatus.total_found > 0 && (
+        {isActive && jobStatus && jobStatus.total_found != null && jobStatus.total_found > 0 && (
           <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
             <div
               className="h-full bg-blue-500 rounded-full transition-all duration-500"
@@ -332,7 +330,6 @@ export default function UploadModal({ onClose, defaultCategory = 'prova' }: Prop
                     <FileRow
                       key={entry.id}
                       entry={entry}
-                      category={category}
                       onRemove={() => removeEntry(entry.id)}
                     />
                   ))}
